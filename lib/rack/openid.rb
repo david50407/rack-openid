@@ -70,7 +70,8 @@ module Rack #:nodoc:
     AUTHENTICATE_HEADER = "WWW-Authenticate"
     AUTHENTICATE_REGEXP = /^OpenID/
 
-    URL_FIELD_SELECTOR = lambda { |field| field.to_s =~ %r{^https?://} }
+    URL_FIELD_SELECTOR = lambda { |field| field.is_a?(Array) or field.to_s =~ %r{^https?://} }
+    NS_ALIAS_PATCH = lambda { |field| field.to_s =~ %r{=} ? field.split('=') : field }
 
     # :startdoc:
 
@@ -224,10 +225,14 @@ module Rack #:nodoc:
       def add_simple_registration_fields(oidreq, fields)
         sregreq = ::OpenID::SReg::Request.new
 
-        required = Array(fields['required']).reject(&URL_FIELD_SELECTOR)
+        required = Array(fields['required']).map { |f|
+          NS_ALIAS_PATCH.call(f)
+        }.reject(&URL_FIELD_SELECTOR)
         sregreq.request_fields(required, true) if required.any?
 
-        optional = Array(fields['optional']).reject(&URL_FIELD_SELECTOR)
+        optional = Array(fields['optional']).map { |f|
+          NS_ALIAS_PATCH.call(f)
+        }.reject(&URL_FIELD_SELECTOR)
         sregreq.request_fields(optional, false) if optional.any?
 
         policy_url = fields['policy_url']
@@ -239,16 +244,28 @@ module Rack #:nodoc:
       def add_attribute_exchange_fields(oidreq, fields)
         axreq = ::OpenID::AX::FetchRequest.new
 
-        required = Array(fields['required']).select(&URL_FIELD_SELECTOR)
-        optional = Array(fields['optional']).select(&URL_FIELD_SELECTOR)
+        required = Array(fields['required']).map { |f|
+          NS_ALIAS_PATCH.call(f)
+        }.select(&URL_FIELD_SELECTOR)
+        optional = Array(fields['optional']).map { |f|
+          NS_ALIAS_PATCH.call(f)
+        }.select(&URL_FIELD_SELECTOR)
 
         if required.any? || optional.any?
           required.each do |field|
-            axreq.add(::OpenID::AX::AttrInfo.new(field, nil, true))
+            if field.is_a?(Array)
+              axreq.add(::OpenID::AX::AttrInfo.new(field[1], field[0], true))
+            else
+              axreq.add(::OpenID::AX::AttrInfo.new(field, nil, true))
+            end
           end
 
           optional.each do |field|
-            axreq.add(::OpenID::AX::AttrInfo.new(field, nil, false))
+            if field.is_a?(Array)
+              axreq.add(::OpenID::AX::AttrInfo.new(field[1], field[0], true))
+            else
+              axreq.add(::OpenID::AX::AttrInfo.new(field, nil, false))
+            end
           end
 
           oidreq.add_extension(axreq)
